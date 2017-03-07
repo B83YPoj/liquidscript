@@ -47,28 +47,19 @@ object Main extends App with ScorexLogging {
   @tailrec
   def loop(lastTimestamp: Long, cookie: (Cookie, Long)): Unit = {
     val currentTime = NTP.correctedTime()
-    val from = new DateTime(lastTimestamp).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
-      .toString("yyyy-MM-dd HH:mm:ss")
-    val to = new DateTime(currentTime).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
-      .toString("yyyy-MM-dd HH:mm:ss")
-    val body = "{dateFrom: \"" + from + "\", dateTo: \"" + to + "\"}"
-    val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, Some(cookie._1))
-    val parsedResp = Json.parse(resp.getResponseBody)
+    val parsedResp = getLiquidProTransactions(lastTimestamp, cookie, currentTime)
     if ((parsedResp \ "success").as[Boolean]) {
       val transactionJss = (parsedResp \ "data").as[List[JsValue]]
       log.info("Got liquid.pro transactions: " + transactionJss.toString)
-      val txs = transactionJss.map { tjs =>
+      transactionJss.foreach { tjs =>
         val hash = (tjs \ "hash").as[String]
         val timestamp = DateTime.parse((tjs \ "time").as[String], formatter.withZone(DateTimeZone.UTC)).getMillis
-        attachmentTransactions(hash.getBytes, timestamp)
-      }
-      //todo monitor that transactions are really in blockchain
-      txs.foreach { tx =>
+        val tx = attachmentTransactions(hash.getBytes, timestamp)
         broadcastedTransactions += tx
         broadcastTransaction(tx)
       }
     } else {
-      log.error("Incorrect response: " + resp)
+      log.error("Incorrect response: " + parsedResp)
     }
 
     Thread.sleep(60000)
@@ -80,6 +71,17 @@ object Main extends App with ScorexLogging {
     loop(currentTime, newCookie)
   }
 
+  def getLiquidProTransactions(lastTimestamp: Long, cookie: (Cookie, Long), currentTime: Long): JsValue = {
+    val from = new DateTime(lastTimestamp).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
+      .toString("yyyy-MM-dd HH:mm:ss")
+    val to = new DateTime(currentTime).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
+      .toString("yyyy-MM-dd HH:mm:ss")
+    val body = "{dateFrom: \"" + from + "\", dateTo: \"" + to + "\"}"
+    val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, Some(cookie._1))
+    Json.parse(resp.getResponseBody)
+  }
+
+  //keep transactions in local cache until they have enough confirmations
   def checkBroadcasted(): Unit = Try {
     val height = (wavesGetRequest("/blocks/height") \ "height").as[Int]
     broadcastedTransactions.foreach { tx =>
@@ -95,7 +97,6 @@ object Main extends App with ScorexLogging {
           }
       }
     }
-
   }
 
   def login(): Cookie = {

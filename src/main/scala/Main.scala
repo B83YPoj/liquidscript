@@ -1,20 +1,21 @@
 
-import com.ning.http.client.Response
 import com.ning.http.client.cookie.Cookie
-import com.typesafe.config.ConfigFactory
 import dispatch.{Http, url}
-import org.joda.time.{DateTime, DateTimeZone}
 import org.joda.time.format.{DateTimeFormat, DateTimeFormatter}
+import org.joda.time.{DateTime, DateTimeZone}
 import play.api.libs.json.{JsValue, Json}
-import scorex.account.{Account, AddressScheme}
+import scorex.account.AddressScheme
 import scorex.crypto.encode.Base58
-import scorex.crypto.hash.{CryptographicHash, ScorexHashChain, SecureCryptographicHash, Sha256}
+import scorex.crypto.hash.Sha256
+import scorex.transaction.Transaction
 import scorex.transaction.assets.TransferTransaction
 import scorex.utils._
 import scorex.wallet.Wallet
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
+import scala.collection.concurrent.TrieMap
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
@@ -28,6 +29,7 @@ object Main extends App with ScorexLogging {
   }
   val liquidProURL = "http://test.liquid.pro"
   val wavesPeer: String = "https://nodes.wavesnodes.com"
+  val broadcastedTransactions: ArrayBuffer[TransferTransaction] = ArrayBuffer[TransferTransaction]()
 
   val Headers: Map[String, String] = Map()
   val seed = args(0)
@@ -61,16 +63,39 @@ object Main extends App with ScorexLogging {
         attachmentTransactions(hash.getBytes, timestamp)
       }
       //todo monitor that transactions are really in blockchain
-      txs.foreach(tx => broadcastTransaction(tx))
-
+      txs.foreach { tx =>
+        broadcastedTransactions += tx
+        broadcastTransaction(tx)
+      }
     } else {
       log.error("Incorrect response: " + resp)
     }
 
     Thread.sleep(60000)
+
+    checkBroadcasted()
+
     val newCookie = if (NTP.correctedTime() - cookie._2 < 7 * 24 * 60 * 1000) cookie
     else (login(), NTP.correctedTime())
     loop(currentTime, newCookie)
+  }
+
+  def checkBroadcasted(): Unit = Try {
+    val height = (wavesGetRequest("/blocks/height") \ "height").as[Int]
+    broadcastedTransactions.foreach { tx =>
+      val resp = wavesGetRequest("/transactions/info/" + Base58.encode(tx.id))
+      (resp \ "height").asOpt[Int] match {
+        case None =>
+          log.info(s"Transaction ${Base58.encode(tx.id)} is not in blockchain")
+          broadcastTransaction(tx)
+        case Some(h) =>
+          log.info(s"Transaction ${Base58.encode(tx.id)} have ${height - h} confirmations")
+          if (height - h > 10) {
+            broadcastedTransactions -= tx
+          }
+      }
+    }
+
   }
 
   def login(): Cookie = {

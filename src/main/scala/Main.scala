@@ -3,7 +3,7 @@ import com.ning.http.client.Response
 import com.ning.http.client.cookie.Cookie
 import com.typesafe.config.ConfigFactory
 import dispatch.{Http, url}
-import org.joda.time.DateTime
+import org.joda.time.{DateTime, DateTimeZone}
 import org.joda.time.format.{DateTimeFormat, DateTimeFormatter}
 import play.api.libs.json.{JsValue, Json}
 import scorex.account.{Account, AddressScheme}
@@ -39,43 +39,53 @@ object Main extends App with ScorexLogging {
 
   log.info("Start script with address " + myAddress.address)
 
-  //todo relogin at most once a month
-  val loginResponse = liquidProPostRequest("/api/account/login",
-    "{\"email\": \"" + email + "\",\"password\": \"" + password + "\"}",
-    None)
-  require((Json.parse(loginResponse.getResponseBody) \ "success").as[Boolean])
-  val loginCookies: Cookie = loginResponse.getCookies.asScala.head
-  log.info("Successful login")
-
-  loop(NTP.correctedTime() - 60000)
+  loop(NTP.correctedTime() - 60000, (login(), NTP.correctedTime()))
 
 
   @tailrec
-  def loop(lastTimestamp: Long): Unit = {
+  def loop(lastTimestamp: Long, cookie: (Cookie, Long)): Unit = {
     val currentTime = NTP.correctedTime()
-    val from = new DateTime(lastTimestamp).toDateTime.toString("yyyy-MM-dd HH:mm:ss")
-    val to = new DateTime(currentTime).toDateTime.toString("yyyy-MM-dd HH:mm:ss")
+    val from = new DateTime(lastTimestamp).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
+      .toString("yyyy-MM-dd HH:mm:ss")
+    val to = new DateTime(currentTime).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
+      .toString("yyyy-MM-dd HH:mm:ss")
     val body = "{dateFrom: \"" + from + "\", dateTo: \"" + to + "\"}"
-    val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, Some(loginCookies))
+    val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, Some(cookie._1))
     val parsedResp = Json.parse(resp.getResponseBody)
     if ((parsedResp \ "success").as[Boolean]) {
       val transactionJss = (parsedResp \ "data").as[List[JsValue]]
-      log.debug(transactionJss.toString)
-      //[{"quoteId":1111,"softQuoteId":1234,"secCode":"BR-3.17M220217CA 55","bidAsk":"Bid","price":2.5,"size":100,"time":"2017-02-13 09:34:40","hash":"9237D7255CA299AFCA7310D0A0494F0F6C5959F2014BF4A0AFFF46B52918B782"},{"quoteId":2222,"softQuoteId":2345,"secCode":"SBRF-3.17M150317PA 1700","bidAsk":"Ask","price":567,"size":1,"time":"2017-02-13 09:34:50","hash":"03D4508EFDED43670FABCA4FEC5500B463457428257070D47E303F9B006FC8C9"}]
+      log.info("Got liquid.pro transactions: " + transactionJss.toString)
       val txs = transactionJss.map { tjs =>
         val hash = (tjs \ "hash").as[String]
-        val timestamp = DateTime.parse((tjs \ "time").as[String], formatter).getMillis
+        val timestamp = DateTime.parse((tjs \ "time").as[String], formatter.withZone(DateTimeZone.UTC)).getMillis
         attachmentTransactions(hash.getBytes, timestamp)
       }
-      println(txs)
-      //!!!!!
+      //todo monitor that transactions are really in blockchain
+      txs.foreach(tx => broadcastTransaction(tx))
 
     } else {
       log.error("Incorrect response: " + resp)
     }
 
     Thread.sleep(60000)
-    loop(currentTime)
+    val newCookie = if (NTP.correctedTime() - cookie._2 < 7 * 24 * 60 * 1000) cookie
+    else (login(), NTP.correctedTime())
+    loop(currentTime, newCookie)
+  }
+
+  def login(): Cookie = {
+    val loginResponse = liquidProPostRequest("/api/account/login",
+      "{\"email\": \"" + email + "\",\"password\": \"" + password + "\"}",
+      None)
+    require((Json.parse(loginResponse.getResponseBody) \ "success").as[Boolean])
+    log.info("Successful login")
+    loginResponse.getCookies.asScala.head
+  }
+
+  def broadcastTransaction(tx: TransferTransaction) = {
+    println("!!! = " + ((NTP.correctedTime() - tx.timestamp) / 1000))
+    val resp = wavesPostRequest("/assets/broadcast/transfer", Map(), tx.json.toString())
+    log.info(s"Transaction ${tx.json} broadcasted: " + resp)
   }
 
   def attachmentTransactions(attachment: Array[Byte], timestamp: Long): TransferTransaction = {

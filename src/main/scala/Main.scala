@@ -31,7 +31,6 @@ object Main extends App with ScorexLogging {
   val wavesPeer: String = "https://nodes.wavesnodes.com"
   val broadcastedTransactions: ArrayBuffer[TransferTransaction] = ArrayBuffer[TransferTransaction]()
 
-  val Headers: Map[String, String] = Map()
   val seed = args(0)
   val email = args(1)
   val password = args(2)
@@ -42,7 +41,6 @@ object Main extends App with ScorexLogging {
   log.info("Start script with address " + myAddress.address)
 
   loop(NTP.correctedTime() - 60000, (login(), NTP.correctedTime()))
-
 
   @tailrec
   def loop(lastTimestamp: Long, cookie: (Cookie, Long)): Unit = {
@@ -126,7 +124,7 @@ object Main extends App with ScorexLogging {
 
   def wavesGetRequest(us: String): JsValue = {
     //todo push to multiple peers
-    val request = Http(url(wavesPeer + us).GET <:< Headers)
+    val request = Http(url(wavesPeer + us).GET)
     val response = Await.result(request, 10.seconds)
     Json.parse(response.getResponseBody)
   }
@@ -134,7 +132,7 @@ object Main extends App with ScorexLogging {
   def wavesPostRequest(us: String,
                        params: Map[String, String] = Map.empty,
                        body: String = ""): JsValue = {
-    val request = Http(url(wavesPeer + us).POST << params <:< Headers << body)
+    val request = Http(url(wavesPeer + us).POST << params << body)
     val response = Await.result(request, 5.seconds)
     Json.parse(response.getResponseBody)
   }

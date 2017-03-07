@@ -83,7 +83,6 @@ object Main extends App with ScorexLogging {
   }
 
   def broadcastTransaction(tx: TransferTransaction) = {
-    println("!!! = " + ((NTP.correctedTime() - tx.timestamp) / 1000))
     val resp = wavesPostRequest("/assets/broadcast/transfer", Map(), tx.json.toString())
     log.info(s"Transaction ${tx.json} broadcasted: " + resp)
   }

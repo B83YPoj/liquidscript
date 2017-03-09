@@ -5,7 +5,7 @@ import org.joda.time.format.{DateTimeFormat, DateTimeFormatter}
 import org.joda.time.{DateTime, DateTimeZone}
 import play.api.libs.json.{JsValue, Json}
 import scorex.account.AddressScheme
-import scorex.crypto.encode.Base58
+import scorex.crypto.encode.{Base16, Base58}
 import scorex.crypto.hash.Sha256
 import scorex.transaction.Transaction
 import scorex.transaction.assets.TransferTransaction
@@ -50,9 +50,7 @@ object Main extends App with ScorexLogging {
       val transactionJss = (parsedResp \ "data").as[List[JsValue]]
       log.info("Got liquid.pro transactions: " + transactionJss.toString)
       transactionJss.foreach { tjs =>
-        val hash = (tjs \ "hash").as[String]
-        val timestamp = DateTime.parse((tjs \ "time").as[String], formatter.withZone(DateTimeZone.UTC)).getMillis
-        val tx = attachmentTransactions(hash.getBytes, timestamp)
+        val tx = txFromJs(tjs)
         broadcastedTransactions += tx
         broadcastTransaction(tx)
       }
@@ -67,6 +65,13 @@ object Main extends App with ScorexLogging {
     val newCookie = if (NTP.correctedTime() - cookie._2 < 7 * 24 * 60 * 1000) cookie
     else (login(), NTP.correctedTime())
     loop(currentTime, newCookie)
+  }
+
+  def txFromJs(tjs: JsValue): TransferTransaction = {
+    val hash = (tjs \ "hash").as[String]
+    val timestamp = DateTime.parse((tjs \ "time").as[String], formatter.withZone(DateTimeZone.UTC)).getMillis
+    val attachment:Array[Byte] = Array(0: Byte) ++ Base16.decode(hash)
+    attachmentTransactions(attachment, timestamp)
   }
 
   def getLiquidProTransactions(lastTimestamp: Long, cookie: (Cookie, Long), currentTime: Long): JsValue = {

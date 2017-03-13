@@ -26,6 +26,10 @@ object Main extends App with ScorexLogging {
   val wavesPeer: String = "https://nodes.wavesnodes.com"
   val broadcastedTransactions: ArrayBuffer[TransferTransaction] = ArrayBuffer[TransferTransaction]()
 
+  val TimeDelay = 10 * 60 * 1000
+  val SleepTime = 60 * 1000
+  val ReloginPeriod = 7 * 24 * 60 * 100
+
   val seed = args(0)
   val email = args(1)
   val password = args(2)
@@ -35,11 +39,11 @@ object Main extends App with ScorexLogging {
 
   log.info("Start script with address " + myAddress.address)
 
-  loop(NTP.correctedTime() - 60000, (login(), NTP.correctedTime()))
+  loop(NTP.correctedTime() - TimeDelay - SleepTime, (login(), NTP.correctedTime()))
 
   @tailrec
   def loop(lastTimestamp: Long, cookie: (HttpCookie, Long)): Unit = {
-    val currentTime = NTP.correctedTime()
+    val currentTime = NTP.correctedTime() - TimeDelay
     val parsedResp = getLiquidProTransactions(lastTimestamp, cookie, currentTime)
     if ((parsedResp \ "success").as[Boolean]) {
       val transactionJss = (parsedResp \ "data").as[List[JsValue]]
@@ -53,11 +57,11 @@ object Main extends App with ScorexLogging {
       log.error("Incorrect response: " + parsedResp)
     }
 
-    Thread.sleep(60000)
+    Thread.sleep(SleepTime)
 
     checkBroadcasted()
 
-    val newCookie = if (NTP.correctedTime() - cookie._2 < 7 * 24 * 60 * 1000) cookie
+    val newCookie = if (NTP.correctedTime() - cookie._2 < ReloginPeriod) cookie
     else (login(), NTP.correctedTime())
     loop(currentTime, newCookie)
   }

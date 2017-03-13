@@ -26,7 +26,7 @@ object Main extends App with ScorexLogging {
   val wavesPeer: String = "https://nodes.wavesnodes.com"
   val broadcastedTransactions: ArrayBuffer[TransferTransaction] = ArrayBuffer[TransferTransaction]()
 
-  val TimeDelay = 10 * 60 * 1000
+  val RequestPeriod = 60 * 60 * 1000
   val SleepTime = 60 * 1000
   val ReloginPeriod = 7 * 24 * 60 * 100
 
@@ -39,19 +39,21 @@ object Main extends App with ScorexLogging {
 
   log.info("Start script with address " + myAddress.address)
 
-  loop(NTP.correctedTime() - TimeDelay - SleepTime, (login(), NTP.correctedTime()))
+  loop((login(), NTP.correctedTime()))
 
   @tailrec
-  def loop(lastTimestamp: Long, cookie: (HttpCookie, Long)): Unit = {
-    val currentTime = NTP.correctedTime() - TimeDelay
-    val parsedResp = getLiquidProTransactions(lastTimestamp, cookie, currentTime)
+  def loop(cookie: (HttpCookie, Long)): Unit = {
+    val currentTime = NTP.correctedTime()
+    val parsedResp = getLiquidProTransactions(currentTime - RequestPeriod, cookie, currentTime)
     if ((parsedResp \ "success").as[Boolean]) {
       val transactionJss = (parsedResp \ "data").as[List[JsValue]]
       log.info(s"Got ${transactionJss.length} liquid.pro transactions: ${transactionJss.toString}")
       transactionJss.foreach { tjs =>
         val tx = txFromJs(tjs)
-        broadcastedTransactions += tx
-        broadcastTransaction(tx)
+        if (!broadcastedTransactions.exists(_.id sameElements tx.id)) {
+          broadcastedTransactions += tx
+          broadcastTransaction(tx)
+        }
       }
     } else {
       log.error("Incorrect response: " + parsedResp)
@@ -63,12 +65,13 @@ object Main extends App with ScorexLogging {
 
     val newCookie = if (NTP.correctedTime() - cookie._2 < ReloginPeriod) cookie
     else (login(), NTP.correctedTime())
-    loop(currentTime, newCookie)
+    loop(newCookie)
   }
 
   def txFromJs(tjs: JsValue): TransferTransaction = {
     val hash = (tjs \ "hash").as[String]
-    val timestamp = DateTime.parse((tjs \ "time").as[String], formatter.withZone(DateTimeZone.UTC)).getMillis
+    val timestamp = DateTime.parse((tjs \ "time").as[String], formatter.withZone(DateTimeZone.forID("Europe/Moscow")))
+      .getMillis
     val attachment: Array[Byte] = Array(0: Byte) ++ Base16.decode(hash)
     attachmentTransactions(attachment, timestamp)
   }
@@ -79,7 +82,7 @@ object Main extends App with ScorexLogging {
     val to = new DateTime(currentTime).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
       .toString("yyyy-MM-dd HH:mm:ss")
     val body = "{dateFrom: \"" + from + "\", dateTo: \"" + to + "\"}"
-//    val body = " {dateFrom: \"2017-03-13 16:00:00\", dateTo: \"2017-03-13 17:00:00\"}"
+    //    val body = " {dateFrom: \"2017-03-13 16:00:00\", dateTo: \"2017-03-13 17:00:00\"}"
     val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, cookie._1)
     Json.parse(resp.body)
   }

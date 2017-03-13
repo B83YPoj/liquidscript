@@ -11,7 +11,7 @@ libraryDependencies ++= Seq(
   "com.wavesplatform" %% "scorex-transaction" % "1.4.6",
   "org.slf4j" % "slf4j-api" % "1.+",
   "com.typesafe.play" %% "play-json" % "2.+",
-  "net.databinder.dispatch" %% "dispatch-core" % "0.+"
+  "org.scalaj" %% "scalaj-http" % "2.3.0"
 )
 scalacOptions ++= Seq("-Xdisable-assertions")
 

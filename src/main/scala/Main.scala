@@ -1,25 +1,20 @@
 
-import com.ning.http.client.cookie.Cookie
-import dispatch.{Http, url}
+import java.net.HttpCookie
+
 import org.joda.time.format.{DateTimeFormat, DateTimeFormatter}
 import org.joda.time.{DateTime, DateTimeZone}
 import play.api.libs.json.{JsValue, Json}
 import scorex.account.AddressScheme
 import scorex.crypto.encode.{Base16, Base58}
 import scorex.crypto.hash.Sha256
-import scorex.transaction.Transaction
 import scorex.transaction.assets.TransferTransaction
 import scorex.utils._
 import scorex.wallet.Wallet
 
 import scala.annotation.tailrec
-import scala.collection.JavaConverters._
-import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration._
 import scala.util.Try
+import scalaj.http.Http
 
 object Main extends App with ScorexLogging {
 
@@ -43,7 +38,7 @@ object Main extends App with ScorexLogging {
   loop(NTP.correctedTime() - 60000, (login(), NTP.correctedTime()))
 
   @tailrec
-  def loop(lastTimestamp: Long, cookie: (Cookie, Long)): Unit = {
+  def loop(lastTimestamp: Long, cookie: (HttpCookie, Long)): Unit = {
     val currentTime = NTP.correctedTime()
     val parsedResp = getLiquidProTransactions(lastTimestamp, cookie, currentTime)
     if ((parsedResp \ "success").as[Boolean]) {
@@ -70,18 +65,18 @@ object Main extends App with ScorexLogging {
   def txFromJs(tjs: JsValue): TransferTransaction = {
     val hash = (tjs \ "hash").as[String]
     val timestamp = DateTime.parse((tjs \ "time").as[String], formatter.withZone(DateTimeZone.UTC)).getMillis
-    val attachment:Array[Byte] = Array(0: Byte) ++ Base16.decode(hash)
+    val attachment: Array[Byte] = Array(0: Byte) ++ Base16.decode(hash)
     attachmentTransactions(attachment, timestamp)
   }
 
-  def getLiquidProTransactions(lastTimestamp: Long, cookie: (Cookie, Long), currentTime: Long): JsValue = {
+  def getLiquidProTransactions(lastTimestamp: Long, cookie: (HttpCookie, Long), currentTime: Long): JsValue = {
     val from = new DateTime(lastTimestamp).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
       .toString("yyyy-MM-dd HH:mm:ss")
     val to = new DateTime(currentTime).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
       .toString("yyyy-MM-dd HH:mm:ss")
     val body = "{dateFrom: \"" + from + "\", dateTo: \"" + to + "\"}"
-    val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, Some(cookie._1))
-    Json.parse(resp.getResponseBody)
+    val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, cookie._1)
+    Json.parse(resp.body)
   }
 
   //keep transactions in local cache until they have enough confirmations
@@ -102,17 +97,17 @@ object Main extends App with ScorexLogging {
     }
   }
 
-  def login(): Cookie = {
+  def login(): HttpCookie = {
     val loginResponse = liquidProPostRequest("/api/account/login",
       "{\"email\": \"" + email + "\",\"password\": \"" + password + "\"}",
-      None)
-    require((Json.parse(loginResponse.getResponseBody) \ "success").as[Boolean])
+      new HttpCookie("test", "test"))
+    require((Json.parse(loginResponse.body) \ "success").as[Boolean], "Login failed: " + loginResponse.body)
     log.info("Successful login")
-    loginResponse.getCookies.asScala.head
+    loginResponse.cookies.head
   }
 
   def broadcastTransaction(tx: TransferTransaction) = {
-    val resp = wavesPostRequest("/assets/broadcast/transfer", Map(), tx.json.toString())
+    val resp = wavesPostRequest("/assets/broadcast/transfer", tx.json.toString())
     log.info(s"Transaction ${tx.json} broadcasted: " + resp)
   }
 
@@ -129,25 +124,24 @@ object Main extends App with ScorexLogging {
 
   def wavesGetRequest(us: String): JsValue = {
     //todo push to multiple peers
-    val request = Http(url(wavesPeer + us).GET)
-    val response = Await.result(request, 10.seconds)
-    Json.parse(response.getResponseBody)
+    val response = Http(wavesPeer + us).asString
+    Json.parse(response.body)
   }
 
   def wavesPostRequest(us: String,
-                       params: Map[String, String] = Map.empty,
                        body: String = ""): JsValue = {
-    val request = Http(url(wavesPeer + us).POST << params << body)
-    val response = Await.result(request, 5.seconds)
-    Json.parse(response.getResponseBody)
+    val response = Http(wavesPeer + us).postData(body).asString
+    Json.parse(response.body)
   }
 
   def liquidProPostRequest(us: String,
                            body: String = "",
-                           cookie: Option[Cookie]) = {
-    val req0 = url(liquidProURL + us).POST.setBody(body).setHeader("Content-Type", "application/json")
-    val request = Http(cookie.map(c => req0.addCookie(c)).getOrElse(req0))
-    Await.result(request, 5.seconds)
+                           cookie: HttpCookie) = {
+    Http(liquidProURL + us)
+      .header("Content-Type", "application/json")
+      .cookie(cookie)
+      .postForm(Seq("email" -> "blockchain@liquid.pro", "password" -> "nOADUTEE6u"))
+      .postData(body)
+      .asString
   }
-
 }

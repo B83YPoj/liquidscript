@@ -43,7 +43,7 @@ object Main extends App with ScorexLogging {
     val parsedResp = getLiquidProTransactions(lastTimestamp, cookie, currentTime)
     if ((parsedResp \ "success").as[Boolean]) {
       val transactionJss = (parsedResp \ "data").as[List[JsValue]]
-      log.info("Got liquid.pro transactions: " + transactionJss.toString)
+      log.info(s"Got ${transactionJss.length} liquid.pro transactions: ${transactionJss.toString}")
       transactionJss.foreach { tjs =>
         val tx = txFromJs(tjs)
         broadcastedTransactions += tx
@@ -75,6 +75,7 @@ object Main extends App with ScorexLogging {
     val to = new DateTime(currentTime).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
       .toString("yyyy-MM-dd HH:mm:ss")
     val body = "{dateFrom: \"" + from + "\", dateTo: \"" + to + "\"}"
+//    val body = " {dateFrom: \"2017-03-13 16:00:00\", dateTo: \"2017-03-13 17:00:00\"}"
     val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, cookie._1)
     Json.parse(resp.body)
   }
@@ -137,6 +138,7 @@ object Main extends App with ScorexLogging {
   def liquidProPostRequest(us: String,
                            body: String = "",
                            cookie: HttpCookie) = {
+    log.info(s"Post request ${liquidProURL + us} with body ${body}")
     Http(liquidProURL + us)
       .header("Content-Type", "application/json")
       .cookie(cookie)

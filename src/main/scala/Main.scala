@@ -22,7 +22,7 @@ object Main extends App with ScorexLogging {
   AddressScheme.current = new AddressScheme {
     val chainId: Byte = 87.toByte
   }
-  val liquidProURL = "http://test.liquid.pro"
+  val liquidProURL = "https://liquid.pro"
   val wavesPeer: String = "https://nodes.wavesnodes.com"
   val broadcastedTransactions: ArrayBuffer[TransferTransaction] = ArrayBuffer[TransferTransaction]()
 

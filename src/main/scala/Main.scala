@@ -43,29 +43,32 @@ object Main extends App with ScorexLogging {
 
   @tailrec
   def loop(cookie: (HttpCookie, Long)): Unit = {
-    val currentTime = NTP.correctedTime()
-    val parsedResp = getLiquidProTransactions(currentTime - RequestPeriod, cookie, currentTime)
-    if ((parsedResp \ "success").as[Boolean]) {
-      val transactionJss = (parsedResp \ "data").as[List[JsValue]]
-      log.info(s"Got ${transactionJss.length} liquid.pro transactions: ${transactionJss.toString}")
-      transactionJss.foreach { tjs =>
-        val tx = txFromJs(tjs)
-        if (!broadcastedTransactions.exists(_.id sameElements tx.id)) {
-          broadcastedTransactions += tx
-          broadcastTransaction(tx)
+    val newCookie: Try[(HttpCookie, Long)] = Try {
+      val currentTime = NTP.correctedTime()
+      val parsedResp = getLiquidProTransactions(currentTime - RequestPeriod, cookie, currentTime)
+      if ((parsedResp \ "success").as[Boolean]) {
+        val transactionJss = (parsedResp \ "data").as[List[JsValue]]
+        log.info(s"Got ${transactionJss.length} liquid.pro transactions: ${transactionJss.toString}")
+        transactionJss.foreach { tjs =>
+          val tx = txFromJs(tjs)
+          if (!broadcastedTransactions.exists(_.id sameElements tx.id)) {
+            broadcastedTransactions += tx
+            broadcastTransaction(tx)
+          }
         }
+      } else {
+        log.error("Incorrect response: " + parsedResp)
       }
-    } else {
-      log.error("Incorrect response: " + parsedResp)
+
+      checkBroadcasted()
+
+      val newCookie = if (NTP.correctedTime() - cookie._2 < ReloginPeriod) cookie
+      else (login(), NTP.correctedTime())
+      newCookie
     }
-
     Thread.sleep(SleepTime)
+    loop(newCookie.getOrElse(cookie))
 
-    checkBroadcasted()
-
-    val newCookie = if (NTP.correctedTime() - cookie._2 < ReloginPeriod) cookie
-    else (login(), NTP.correctedTime())
-    loop(newCookie)
   }
 
   def txFromJs(tjs: JsValue): TransferTransaction = {

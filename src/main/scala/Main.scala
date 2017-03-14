@@ -26,7 +26,8 @@ object Main extends App with ScorexLogging {
   val wavesPeer: String = "https://nodes.wavesnodes.com"
   val broadcastedTransactions: ArrayBuffer[TransferTransaction] = ArrayBuffer[TransferTransaction]()
 
-  val RequestPeriod = 60 * 60 * 1000
+  val ConfirmationsToWait = 60
+  val RequestPeriod = ConfirmationsToWait * 60 * 1000
   val SleepTime = 60 * 1000
   val ReloginPeriod = 7 * 24 * 60 * 100
 
@@ -101,7 +102,7 @@ object Main extends App with ScorexLogging {
           broadcastTransaction(tx)
         case Some(h) =>
           log.info(s"Transaction ${Base58.encode(tx.id)} have ${height - h} confirmations")
-          if (height - h > 10) {
+          if (height - h > ConfirmationsToWait) {
             broadcastedTransactions -= tx
           }
       }

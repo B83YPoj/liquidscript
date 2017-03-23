@@ -1,5 +1,6 @@
 
 import java.net.HttpCookie
+import java.nio.charset.StandardCharsets
 
 import org.joda.time.format.{DateTimeFormat, DateTimeFormatter}
 import org.joda.time.{DateTime, DateTimeZone}
@@ -26,6 +27,7 @@ object Main extends App with ScorexLogging {
   val wavesPeer: String = "https://nodes.wavesnodes.com"
   val broadcastedTransactions: ArrayBuffer[TransferTransaction] = ArrayBuffer[TransferTransaction]()
 
+  val MaxAttachmentSize = 140
   val ConfirmationsToWait = 60
   val RequestPeriod = ConfirmationsToWait * 60 * 1000
   val SleepTime = 60 * 1000
@@ -73,11 +75,11 @@ object Main extends App with ScorexLogging {
   }
 
   def txFromJs(tjs: JsValue): TransferTransaction = {
-    val hash = (tjs \ "hash").as[String]
+    val toBlockchain = (tjs \ "toBlockchain").as[String].getBytes(StandardCharsets.US_ASCII)
+    if(toBlockchain.length > MaxAttachmentSize) log.warn(s"Attachment too big: ${(tjs \ "toBlockchain").as[String]}")
     val timestamp = DateTime.parse((tjs \ "time").as[String], formatter.withZone(DateTimeZone.forID("Europe/Moscow")))
       .getMillis
-    val attachment: Array[Byte] = Array(0: Byte) ++ Base16.decode(hash)
-    attachmentTransactions(attachment, timestamp)
+    attachmentTransactions(toBlockchain.take(MaxAttachmentSize), timestamp)
   }
 
   def getLiquidProTransactions(lastTimestamp: Long, cookie: (HttpCookie, Long), currentTime: Long): JsValue = {
@@ -86,7 +88,6 @@ object Main extends App with ScorexLogging {
     val to = new DateTime(currentTime).toDateTime.withZone(DateTimeZone.forID("Europe/Moscow"))
       .toString("yyyy-MM-dd HH:mm:ss")
     val body = "{dateFrom: \"" + from + "\", dateTo: \"" + to + "\"}"
-    //    val body = " {dateFrom: \"2017-03-13 16:00:00\", dateTo: \"2017-03-13 17:00:00\"}"
     val resp = liquidProPostRequest("/api/blockchain/GetQuotesLog", body, cookie._1)
     Json.parse(resp.body)
   }

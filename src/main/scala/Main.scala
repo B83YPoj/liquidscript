@@ -28,7 +28,7 @@ object Main extends App with ScorexLogging {
   val broadcastedTransactions: ArrayBuffer[TransferTransaction] = ArrayBuffer[TransferTransaction]()
 
   val MaxAttachmentSize = 140
-  val ConfirmationsToWait = 60
+  val ConfirmationsToWait = 10
   val RequestPeriod = ConfirmationsToWait * 60 * 1000
   val SleepTime = 60 * 1000
   val ReloginPeriod = 7 * 24 * 60 * 100

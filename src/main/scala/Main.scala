@@ -14,7 +14,7 @@ import scorex.wallet.Wallet
 
 import scala.annotation.tailrec
 import scala.collection.mutable.ArrayBuffer
-import scala.util.Try
+import scala.util.{Failure, Try}
 import scalaj.http.Http
 
 object Main extends App with ScorexLogging {
@@ -119,9 +119,13 @@ object Main extends App with ScorexLogging {
     loginResponse.cookies.head
   }
 
-  def broadcastTransaction(tx: TransferTransaction) = {
+  def broadcastTransaction(tx: TransferTransaction) = Try {
     val resp = wavesPostRequest("/assets/broadcast/transfer", tx.json.toString())
     log.info(s"Transaction ${tx.json} broadcasted: " + resp)
+  }.recoverWith{
+    case e =>
+      e.printStackTrace
+      Failure(e)
   }
 
   def attachmentTransactions(attachment: Array[Byte], timestamp: Long): TransferTransaction = {
@@ -137,13 +141,13 @@ object Main extends App with ScorexLogging {
 
   def wavesGetRequest(us: String): JsValue = {
     //todo push to multiple peers
-    val response = Http(wavesPeer + us).asString
+    val response = Http(wavesPeer + us).header("content-type", "application/json").asString
     Json.parse(response.body)
   }
 
   def wavesPostRequest(us: String,
                        body: String = ""): JsValue = {
-    val response = Http(wavesPeer + us).postData(body).asString
+    val response = Http(wavesPeer + us).header("content-type", "application/json").postData(body).asString
     Json.parse(response.body)
   }
 
